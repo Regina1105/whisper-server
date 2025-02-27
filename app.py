@@ -14,8 +14,11 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 @app.route('/transcribe', methods=['POST'])
 def transcribe_audio():
     logger.info("Received request")
+    
+    # Получаем JSON-данные из запроса
     data = request.get_json()
     voice_url = data.get("voice_url")
+    
     if not voice_url:
         logger.info("No voice_url provided")
         return jsonify({"message": "Ошибка: голосовое сообщение не передано!"}), 400
@@ -39,9 +42,13 @@ def transcribe_audio():
     temp_mp3 = "/tmp/temp_audio.mp3"
     try:
         logger.info("Converting .ogg to .mp3")
-        stream = ffmpeg.input(temp_ogg)
-        stream = ffmpeg.output(stream, temp_mp3)
-        ffmpeg.run(stream)
+        (
+            ffmpeg
+            .input(temp_ogg)
+            .output(temp_mp3, format="mp3", acodec="libmp3lame")
+            .overwrite_output()
+            .run()
+        )
         logger.info("Conversion successful")
     except ffmpeg.Error as e:
         logger.error(f"Error converting audio: {str(e)}")
@@ -51,22 +58,23 @@ def transcribe_audio():
     with open(temp_mp3, "rb") as f:
         voice_file = f.read()
 
-    mime_type = "audio/mpeg"
-    filename = "voice.mp3"
-
+    # Отправляем файл на распознавание в OpenAI Whisper API
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {openai_api_key}"}
     files = {
-        "file": (filename, voice_file, mime_type),
-        "model": (None, "whisper-1"),
-        "language": (None, "ru")
+        "file": ("voice.mp3", voice_file, "audio/mpeg")
+    }
+    data = {
+        "model": "whisper-1",
+        "language": "ru"
     }
 
     try:
         logger.info("Sending to OpenAI")
-        response = requests.post(url, headers=headers, files=files)
+        response = requests.post(url, headers=headers, files=files, data=data)
         response.raise_for_status()
         logger.info("OpenAI response received")
+        
         data = response.json()
         recognized_text = data.get("text", "Ошибка распознавания")
     except Exception as e:
