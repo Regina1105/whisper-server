@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import ffmpeg
 import logging
 
 # Настройка логирования для отладки
@@ -29,17 +30,36 @@ def transcribe_audio():
         logger.error(f"Error downloading audio: {str(e)}")
         return jsonify({"message": f"Ошибка при загрузке аудио: {str(e)}"}), 500
 
-    # Проверка поддерживаемого формата
-    mime_type = "audio/mpeg" if voice_url.endswith(".mp3") else "audio/wav"
-    filename = "voice.mp3" if voice_url.endswith(".mp3") else "voice.wav"
-    if not mime_type.startswith("audio"):
-        return jsonify({"message": "Ошибка: поддерживаются только .mp3 и .wav"}), 400
+    # Сохраняем временный .ogg файл
+    temp_ogg = "/tmp/temp_audio.ogg"
+    with open(temp_ogg, "wb") as f:
+        f.write(voice_file)
+
+    # Конвертируем .ogg в .mp3
+    temp_mp3 = "/tmp/temp_audio.mp3"
+    try:
+        logger.info("Converting .ogg to .mp3")
+        stream = ffmpeg.input(temp_ogg)
+        stream = ffmpeg.output(stream, temp_mp3)
+        ffmpeg.run(stream)
+        logger.info("Conversion successful")
+    except ffmpeg.Error as e:
+        logger.error(f"Error converting audio: {str(e)}")
+        return jsonify({"message": f"Ошибка при конверсии аудио: {str(e)}"}), 500
+
+    # Читаем конвертированный файл
+    with open(temp_mp3, "rb") as f:
+        voice_file = f.read()
+
+    mime_type = "audio/mpeg"
+    filename = "voice.mp3"
 
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {openai_api_key}"}
     files = {
         "file": (filename, voice_file, mime_type),
-        "model": "whisper-1"
+        "model": (None, "whisper-1"),
+        "language": (None, "ru")
     }
 
     try:
@@ -55,5 +75,5 @@ def transcribe_audio():
 
     return jsonify({"message": recognized_text})
 
-if name == "__main__":
+if name == "__main__":  # Исправлено с if name == "__main__"
     app.run(host="0.0.0.0", port=5000)
