@@ -50,9 +50,14 @@ def transcribe_audio():
             .run()
         )
         logger.info("Conversion successful")
-    except ffmpeg.Error as e:
-        logger.error(f"Error converting audio: {str(e)}")
-        return jsonify({"message": f"Ошибка при конверсии аудио: {str(e)}"}), 500
+    except (ffmpeg.Error, AttributeError) as e:
+        logger.error(f"Error converting audio: {str(e)}. FFmpeg may not be installed.")
+        return jsonify({"message": f"Ошибка при конверсии аудио: {str(e)}. Убедитесь, что FFmpeg установлен на сервере."}), 500
+    finally:
+        # Очистка временных файлов
+        for temp_file in [temp_ogg, temp_mp3]:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
     # Читаем конвертированный файл
     with open(temp_mp3, "rb") as f:
@@ -74,7 +79,6 @@ def transcribe_audio():
         response = requests.post(url, headers=headers, files=files, data=data)
         response.raise_for_status()
         logger.info("OpenAI response received")
-        
         data = response.json()
         recognized_text = data.get("text", "Ошибка распознавания")
     except Exception as e:
