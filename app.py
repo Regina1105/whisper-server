@@ -55,5 +55,5 @@ def transcribe_audio():
 
     return jsonify({"message": recognized_text})
 
-if name == "__main__":  # Исправлено с if name == "__main__"
+if __name__ == "__main__":  # Исправлено с if name == "__main__"
     app.run(host="0.0.0.0", port=5000)
