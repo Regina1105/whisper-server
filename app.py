@@ -4,7 +4,6 @@ import os
 import ffmpeg
 import logging
 
-# Настройка логирования для отладки
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -14,11 +13,8 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 @app.route('/transcribe', methods=['POST'])
 def transcribe_audio():
     logger.info("Received request")
-    
-    # Получаем JSON-данные из запроса
     data = request.get_json()
     voice_url = data.get("voice_url")
-    
     if not voice_url:
         logger.info("No voice_url provided")
         return jsonify({"message": "Ошибка: голосовое сообщение не передано!"}), 400
@@ -33,41 +29,33 @@ def transcribe_audio():
         logger.error(f"Error downloading audio: {str(e)}")
         return jsonify({"message": f"Ошибка при загрузке аудио: {str(e)}"}), 500
 
-    # Сохраняем временный .ogg файл
     temp_ogg = "/tmp/temp_audio.ogg"
     with open(temp_ogg, "wb") as f:
         f.write(voice_file)
 
-    # Конвертируем .ogg в .mp3
     temp_mp3 = "/tmp/temp_audio.mp3"
     try:
         logger.info("Converting .ogg to .mp3")
-        (
-            ffmpeg
-            .input(temp_ogg)
-            .output(temp_mp3, format="mp3", acodec="libmp3lame")
-            .overwrite_output()
-            .run()
-        )
+        ffmpeg.input(temp_ogg).output(temp_mp3, format="mp3", acodec="libmp3lame").overwrite_output().run()
         logger.info("Conversion successful")
     except (ffmpeg.Error, AttributeError) as e:
         logger.error(f"Error converting audio: {str(e)}. FFmpeg may not be installed.")
         return jsonify({"message": f"Ошибка при конверсии аудио: {str(e)}. Убедитесь, что FFmpeg установлен на сервере."}), 500
     finally:
-        # Очистка временных файлов
         for temp_file in [temp_ogg, temp_mp3]:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
-    # Читаем конвертированный файл
     with open(temp_mp3, "rb") as f:
         voice_file = f.read()
 
-    # Отправляем файл на распознавание в OpenAI Whisper API
+    mime_type = "audio/mpeg"
+    filename = "voice.mp3"
+
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {openai_api_key}"}
     files = {
-        "file": ("voice.mp3", voice_file, "audio/mpeg")
+        "file": (filename, voice_file, mime_type)
     }
     data = {
         "model": "whisper-1",
