@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import logging
-import mimetypes
+import mimetypes  # Добавлено для проверки формата
 
 # Настройка логирования для отладки
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +31,7 @@ def transcribe_audio():
         return jsonify({"message": f"Ошибка при загрузке аудио: {str(e)}"}), 500
 
     # Проверка поддерживаемого формата и размера
+    logger.info("Checking file format and size")
     max_size = 25 * 1024 * 1024  # 25 MB in bytes
     if len(voice_file) > max_size:
         logger.error("File too large")
@@ -41,11 +42,13 @@ def transcribe_audio():
         logger.error("Unsupported audio format")
         return jsonify({"message": "Ошибка: неподдерживаемый формат аудио"}), 400
 
-    # Проверка расширения
-    mime_type = "audio/mpeg" if voice_url.endswith(".mp3") else "audio/wav"
-    filename = "voice.mp3" if voice_url.endswith(".mp3") else "voice.wav"
-    if not mime_type.startswith("audio"):
-        return jsonify({"message": "Ошибка: поддерживаются только .mp3 и .wav"}), 400
+    # Проверка содержимого файла (пример, можно улучшить)
+    if mime_type == "audio/mpeg":
+        filename = "voice.mp3"
+    elif mime_type == "audio/wav":
+        filename = "voice.wav"
+    else:
+        return jsonify({"message": "Ошибка: неподдерживаемый формат аудио"}), 400
 
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {openai_api_key}"}
