@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import logging
-import mimetypes  # Для определения MIME-типа
+import ffmpeg
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +27,10 @@ def transcribe_audio():
         logger.info(f"Downloading from {voice_url}")
         voice_response = requests.get(voice_url, timeout=10)
         voice_response.raise_for_status()
-        voice_file = voice_response.content
+        # Сохраняем файл с оригинальным расширением из URL
+        temp_file = 'temp_audio' + os.path.splitext(voice_url)[1]
+        with open(temp_file, 'wb') as f:
+            f.write(voice_response.content)
         logger.info("Download successful")
     except Exception as e:
         logger.error(f"Error downloading audio: {str(e)}")
@@ -35,38 +38,40 @@ def transcribe_audio():
 
     # Проверка размера файла
     max_size = 25 * 1024 * 1024  # 25 MB
-    file_size = len(voice_file)
+    file_size = os.path.getsize(temp_file)
     logger.info(f"File size: {file_size} bytes")
     if file_size > max_size:
         logger.error("File too large")
+        os.remove(temp_file)
         return jsonify({"message": "Ошибка: файл слишком большой (максимум 25 МБ)"}), 400
 
-    # Определение MIME-типа файла
-    mime_type = voice_response.headers.get("Content-Type", "")
-    logger.info(f"Detected MIME type: {mime_type}")
+    # Конвертация в .wav для совместимости с OpenAI API
+    temp_wav = 'temp_audio.wav'
+    try:
+        ffmpeg.input(temp_file).output(temp_wav, acodec='pcm_s16le', ac=1, ar='16k').run(overwrite_output=True)
+        logger.info("Conversion to WAV successful")
+    except Exception as e:
+        logger.error(f"Error converting audio: {str(e)}")
+        os.remove(temp_file)
+        return jsonify({"message": f"Ошибка конвертации аудио: {str(e)}"}), 500
 
-    # Проверка поддерживаемых форматов
-    supported_formats = {
-        "audio/mpeg": "voice.mp3",
-        "audio/wav": "voice.wav",
-        "audio/ogg": "voice.ogg",
-        "audio/webm": "voice.webm"
-    }
+    # Подготовка файла для OpenAI API
+    try:
+        with open(temp_wav, 'rb') as f:
+            audio_file = f.read()
+    except Exception as e:
+        logger.error(f"Error reading converted file: {str(e)}")
+        os.remove(temp_file)
+        os.remove(temp_wav)
+        return jsonify({"message": f"Ошибка при чтении файла: {str(e)}"}), 500
 
-    filename = supported_formats.get(mime_type)
-    if not filename:
-        logger.error("Unsupported audio format")
-        return jsonify({"message": "Ошибка: неподдерживаемый формат аудио"}), 400
-
-    # ✅ Отправка файла в OpenAI Whisper API
+    # Отправка файла в OpenAI Whisper API
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {
         "Authorization": f"Bearer {openai_api_key}",
-        "Content-Type": "multipart/form-data"  # ✅ Добавлен Content-Type
     }
-    
     files = {
-        "file": (filename, voice_file, mime_type)
+        "file": ("voice.wav", audio_file, "audio/wav")
     }
     data = {
         "model": "whisper-1",
@@ -82,12 +87,19 @@ def transcribe_audio():
         # Получение результата распознавания
         result = response.json()
         recognized_text = result.get("text", "Ошибка распознавания")
+        logger.info(f"Recognized text: {recognized_text}")
     except Exception as e:
-        logger.error(f"Error processing audio: {str(e)}")
-        return jsonify({"message": f"Ошибка в обработке голосового: {str(e)}"}), 500
+        logger.error(f"Error processing audio: {str(e)} - Response: {response.text if 'response' in locals() else 'No response'}")
+        os.remove(temp_file)
+        os.remove(temp_wav)
+        return jsonify({"message": f"Ошибка в обработке голосового: {str(e)} - Подробности: {response.text if 'response' in locals() else 'Нет данных'}"}), 500
+    finally:
+        # Удаление временных файлов
+        for file in [temp_file, temp_wav]:
+            if os.path.exists(file):
+                os.remove(file)
 
     return jsonify({"message": recognized_text})
 
-# ✅ Исправлена ошибка в запуске приложения
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
